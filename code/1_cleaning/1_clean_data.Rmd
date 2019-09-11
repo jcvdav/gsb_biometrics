@@ -1,0 +1,304 @@
+---
+title: "Clean the GSB dataset"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  html_document: 
+    code_folding: hide
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here("docs")) })
+---
+
+```{r setup}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+
+# Load packages
+suppressPackageStartupMessages({
+  library(startR)
+  library(here)
+  library(janitor)
+  library(readxl)
+  library(rnaturalearth)
+  library(corrplot)
+  library(GGally)
+  library(tidyverse)
+})
+
+```
+
+# The data
+
+The dataset lives under `raw_data/DB_Otolith_GiantSeaBass_190826` as an excel spreadsheet. It is a bit messy and needs some work before we can run analyses. The purpose of this document is to outline some of the modifications that are needed before proceeding to run any analyses.
+
+As of right now, the data look like this:
+
+![](../../docs/img/screenshot_DB_Otolith_GiantSeaBass_190826.png)
+
+Each row represents a record, as indicated by the `Record_number` field. There is also a `Record_ID` that contains more information about the sample. A couple of details to bear in mind:
+
+- There is an `Obs` column wit anotations for some metrics. For example, record `SG-EN-170529-01` says that TL was inferred from head length. As such, we cannot use this sample to estimate the TL - HL relationship. We should also make robustness checks to include - exclude them when estimating other relationships.
+
+- The columnames are quite good, but some include parentheses and a combination of upper and lowercase letters along with underscores. We'll have to normalize these.
+
+- There are a couple of otholits with observations for "Broken tip", which we will have to account for when estimating relationships.
+
+- The data uses `ND` for missing information, which we'll convert into `NA`s in R. Every empty space in the database will also be `NA`.
+
+In this document, we will address these details in the data, as well as some others that will be discovered as we go. In the end, we'll export a clean version of the data into the `data` folder. That version will be used in all analyses and should **NEVER** be modified by hand.
+
+# Clean the data {.tabset}
+
+## Read the data
+
+The data are in excel, and exist only in the first sheet, called `DataBase_Otolith`. Let's read that one.
+
+```{r read-data}
+gsb_data <- read_excel(path = here("raw_data", "DB_Otolith_GiantSeaBass_190826.xlsx"),
+                       sheet = "DataBase_Otolith",
+                       na = "ND",
+                       trim_ws = T)
+```
+
+## Explore the data
+
+First, let's explore the column names and `class` of each column
+
+```{r}
+colnames(gsb_data)
+```
+
+
+```{r explore-classes}
+lapply(gsb_data, class)
+```
+
+## Standardize column names
+
+Some columns have weird characters, like the copy right character in Right `(R)` which excel decided to convert to the copyright character. Some other columns have spaces, and some have a combination of `CamelCase` and `snake_case`. Before creating new variable names, we at least need names that we can call programmatically. A first pass at this can be done with `janitor::clean_names()`.
+
+```{r fix-columnames}
+gsb_data <- 
+  clean_names(gsb_data, case = "snake")
+
+colnames(gsb_data)
+```
+
+The new columnames seem a bit better. In fact, we will only further modify a few of them. `record_date_month_day_year` will be just `date`, and `otolith_picture_adrian` will be just `otolith_picture`. The columns for `fish_*_length` can also be modified to something shorter. For example, we'll use `f_tl` for `fish_t_length_cm`. There are also a couple misspelings in the columns, like "rigth" instead of "right", "weigth" instead of "weight" or "otholit" instead of "otolith". Let's fix all these.
+
+```{r}
+gsb_data <- 
+  gsb_data %>% 
+  rename(o_picture = otolith_picture_adrian,
+         date = record_date_month_day_year,
+         f_w = fish_weight_kg,
+         f_tl = fish_t_length_cm,
+         f_sl = fish_s_length_cm,
+         f_hl = fish_head_length_cm,
+         f_condition = fish_condition,
+         age = age_years,
+         age2 = age_years_2,
+         o_de = otolith_depth_mm,
+         o_le = otolith_lenght_mm,
+         o_wi = otolith_width_mm,
+         o_td = otolith_totaldepth_mm,
+         o_we = otolith_weigth_g,
+         o_side = left_l_or_rigth,
+         o_condition = otholit_condition)
+
+colnames(gsb_data)
+```
+
+Now, let's re-order the columns by "groups". What I mean by this is that I will have all metadata first, then all about fish (*i.e.* variables that start with `f`), all about otoliths, and then the observations.
+
+```{r order-variables}
+gsb_data <- 
+  gsb_data %>% 
+  select(record_number, project, record_id, date, loc_region, catch_site, catch_site_acc, lat, long, sex,
+         starts_with("f_"),
+         starts_with("o_"),
+         obs)
+
+colnames(gsb_data)
+```
+
+```{r peak1}
+head(gsb_data) %>% 
+  knitr::kable()
+```
+
+## Cleanup some records
+
+So far, we have only modified the column names. Now that we have a friendly way of calling each variable, let's see what's in them. A short description of the data would be to look at the number of missing values, the number of unique values, and the number of duplicate values in each record:
+
+```{r}
+# Create a function to return key information on a by-column basis
+foo <- function(x) {
+  nas <- sum(is.na(x))
+  n_unique <- length(unique(x))
+  n_dups <- length(x) - n_unique
+  
+  return(tibble(nas = nas,
+                n_unique = n_unique,
+                n_dups = n_dups))
+}
+
+# Apply the function
+map_df(gsb_data, foo, .id = "Var") %>% 
+  knitr::kable()
+```
+
+### Fill-in `NA`s
+
+Let's start cleaning up the data from left to right. The first problem appears in `catch_site_acc`, which has many empty fields.  Let's replace missing values of all categorical variables with more sensible meanings. We have a couple of missing values on biometric measurements, but that's fine.
+
+Let's assume that:
+
+- missing `catch_site_cc` means `Low`
+- missing `o_picture` means `NO`
+- missing `f_conditon` means `Eviscerated`
+- missing `o_condition` means `Fine`
+
+
+```{r replace-missing}
+# Define a list of missing values to be replaced
+replace <- list(catch_site_acc = "Low",
+                o_picture = "NO",
+                f_condition = "Eviscerated",
+                o_condition = "Fine")
+
+# Apply the replacement
+gsb_data <- 
+  gsb_data %>% 
+  replace_na(replace = replace)
+
+head(gsb_data) %>% 
+  knitr::kable()
+```
+
+### Modify ambiguous values
+
+Let's take a look at the unique values in each of the character variables.
+
+
+```{r unique-chars}
+# Create a function to return the sorted unique values
+sort_unique <- function(x) {
+  sort(unique(x))
+}
+
+# Apply the function to character variables onlu
+gsb_data %>% 
+  select_if(is.character) %>% 
+  select(-c(record_id)) %>% 
+  lapply(sort_unique)
+```
+
+From the list above, we can see the following mistakes:
+
+- `sex` has value `Inmature`, which doesn't exist. It should be `Immature`.
+- `o_picture` should only take value sof `YES` and `NO`, but there's a `2`.
+- `o_condition` has multiple ways of reporting conditon. For example, `broken tip` and `Broken tip`.
+
+Let's fix this.
+
+```{r fix_ambig}
+gsb_data <- 
+  gsb_data %>% 
+  mutate(sex = ifelse(sex == "Inmature", "Immature", sex),
+         o_picture = ifelse(o_picture == "2", "YES", o_picture),
+         o_obs = o_condition,
+         o_condition = ifelse(o_condition == "Fine", "Fine", "Broken"))
+
+head(gsb_data) %>% 
+  knitr::kable()
+```
+
+## Preeliminary visualizations as checks
+
+### Maps (are all coordinates in reasonable spots?)
+
+```{r map}
+baja <- ne_states(country = c("Mexico", "United States of America"),
+                  returnclass = "sf") %>% 
+  filter(name %in% c("Baja California", "Baja California Sur", "California"))
+
+gsb_data %>% 
+  group_by(project, loc_region, catch_site, catch_site_acc, lat, long) %>% 
+  count() %>% 
+  arrange(desc(n)) %>% 
+  ungroup() %>% 
+  ggplot() +
+  geom_sf(data = baja, color = "transparent", fill = "gray") +
+  geom_point(aes(x = long, y = lat, size = n, fill = catch_site_acc), color = "black", pch = 21) +
+  ggtheme_map() +
+  scale_fill_brewer(palette = "Set1")
+```
+
+
+### Histograms (are all variables in reasonable ranges?)
+
+```{r histograms}
+gsb_data %>% 
+  select_if(is.numeric) %>% 
+  select(-c(lat, long)) %>% 
+  gather(variable, value, -record_number) %>% 
+  drop_na(value) %>% 
+  ggplot() +
+  geom_density(aes(x = value), fill = "steelblue") +
+  facet_wrap(~variable, scales = "free") +
+  ggtheme_plot()
+```
+
+
+### Correlogram (are all variables behaving as expected-ish?)
+
+```{r}
+gsb_data %>% 
+  select_if(is.numeric) %>% 
+  select(-c(record_number, long, lat)) %>% 
+  cor(use = "pairwise.complete.obs") %>% 
+  corrplot(method = "ellipse",
+           type = "lower",
+           outline = T)
+```
+
+### Pairwise plots
+
+```{r}
+gsb_data %>% 
+  select_if(is.numeric) %>% 
+  select(-c(record_number, long, lat)) %>%
+  ggpairs(progress = F) +
+  ggtheme_plot()
+```
+
+
+
+## Export the data
+
+```{r export}
+write.csv(x = gsb_data,
+          file = here("data", "biometrics.csv"),
+          row.names = F)
+```
+
+
+# Reproducibility info {.tabset}
+
+## System info
+
+```{r sys-info}
+Sys.info()
+```
+
+
+## Session info
+
+```{r session-info}
+sessionInfo()
+```
+
+
