@@ -1,0 +1,257 @@
+---
+title: "Clean the GSB dataset"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  html_document: 
+    code_folding: hide
+    toc: yes
+    toc_float: yes
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here("docs")) })
+---
+
+```{r setup}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+
+# Load packages
+suppressPackageStartupMessages({
+  library(startR)
+  library(here)
+  library(broom)
+  library(stargazer)
+  library(ggrepel)
+  library(tidyverse)
+})
+
+# Read the data
+gsb_data <- read.csv(file = here("data", "biometrics.csv"),
+                     stringsAsFactors = F)
+
+# Set defaults
+
+update_geom_defaults(geom = "point",
+                     list(shape = 21,
+                          color = "black",
+                          size = 3))
+
+update_geom_defaults(geom = "density",
+                     list(fill = "steelblue",
+                          alpha = 0.5))
+
+update_geom_defaults(geom = "smooth",
+                     list(method = "lm",
+                          linetype = "dashed",
+                          color = "black",
+                          size = 1))
+
+theme_set(ggtheme_plot())
+
+ggplot <- function(...) ggplot2::ggplot(...) + scale_fill_brewer(palette = "Set1")
+
+```
+
+This document contains the analyses of biometric data for Giant Sea Bass. We will first focus on the fish biometrics and all their relationships. We will then go to otolith biometrics. Then we'll combine these two.
+
+
+# Fish biometrics {.tabset}
+
+Fish biometrics makes reference to the following variables:
+
+- `f_w` for fish weight, in kg
+- `f_tl` for fish Total Length, in cm
+- `f_sl` for fish Standard Length, in cm
+- `f_hl` for fish head length, in cm
+- `f_condition` for the condition of the fish
+
+## Length - length relationships
+
+### SL 2 TL
+
+```{r}
+gsb_data %>% 
+  select(f_tl, f_sl, f_condition, obs) %>% 
+  drop_na(f_tl, f_sl) %>% 
+  ggplot(mapping = aes(x = f_sl, y = f_tl)) +
+  geom_smooth(method = "lm") +
+  geom_point(aes(fill = f_condition)) +
+  geom_text_repel(aes(label = obs)) +
+  coord_equal()
+```
+
+
+## Head - length relationships
+
+Sometimes we can only sample a head. What whas the size of the organism? Let's try and do that.
+
+### HL 2 SL
+
+```{r}
+gsb_data %>% 
+  select(f_hl, f_sl, f_condition, obs) %>% 
+  drop_na(f_hl, f_sl) %>%
+  ggplot(mapping = aes(x = f_hl, y = f_sl)) +
+  geom_smooth(method = "lm") +
+  geom_point(aes(fill = f_condition)) +
+  geom_text_repel(aes(label = obs))
+```
+
+
+### HL 2 TL
+
+```{r}
+gsb_data %>% 
+  select(f_hl, f_tl, f_condition, obs) %>% 
+  drop_na(f_hl, f_tl) %>%
+  ggplot(mapping = aes(x = f_hl, y = f_tl)) +
+  geom_smooth(method = "lm") +
+  geom_point(aes(fill = f_condition)) +
+  geom_text_repel(aes(label = obs))
+```
+
+## Weight - length relationships
+
+### SL 2 W
+
+```{r}
+gsb_data %>% 
+  select(f_w, f_sl, f_condition, obs) %>% 
+  drop_na(f_w, f_sl) %>%
+  ggplot(mapping = aes(x = log10(f_sl), y = log10(f_w))) +
+  geom_smooth(method = "lm")+
+  geom_point(aes(fill = f_condition)) +
+  geom_text_repel(aes(label = obs))
+```
+
+
+### TL 2 W
+
+```{r}
+gsb_data %>% 
+  select(f_w, f_tl, f_condition, obs) %>% 
+  drop_na(f_w, f_tl) %>%
+  ggplot(mapping = aes(x = log10(f_tl), y = log10(f_w))) +
+  geom_smooth(method = "lm")+
+  geom_point(aes(fill = f_condition)) +
+  geom_text_repel(aes(label = obs))
+```
+
+### HL 2 W
+
+```{r}
+gsb_data %>% 
+  select(f_w, f_hl, f_condition, obs) %>% 
+  drop_na(f_w, f_hl) %>%
+  ggplot(mapping = aes(x = log10(f_hl), y = log10(f_w))) +
+  geom_smooth(method = "lm")+
+  geom_point(aes(fill = f_condition)) +
+  geom_text_repel(aes(label = obs))
+```
+
+
+## Estimate all fish parameters
+
+As seen in the figures above, there are a couple of instances where all information comes only from the head. For the purpose of estimating parameters, we cannot use this values, so we will filter them out.
+
+```{r}
+# Function to fit the model
+fit_model <- function(x, data) {
+  # f <- as.formula(x)
+  lm(formula = f, data = data)
+}
+
+# Function to plot the residuals
+res_plot <- function(x, title) {
+  d <- tibble(residuals = x$residuals)
+  
+  ggplot(data = d, mapping = aes(x = residuals)) +
+    geom_density() +
+    ggtitle(title)
+}
+
+# Filter the data
+gsb_data_filtered <- 
+  gsb_data %>% 
+  filter(!f_condition == "HEAD")
+
+# Fit the models
+length_models <- tibble(model_name = c("SL2TL",
+                                       "HL2SL",
+                                       "HL2TL",
+                                       "SL2TW",
+                                       "TL2TW",
+                                       "HL2TW"),
+                        formula = c("f_tl ~ f_sl",
+                                    "f_sl ~ f_hl",
+                                    "f_tl ~ f_hl",
+                                    "log10(f_w) ~ log10(f_sl)",
+                                    "log10(f_w) ~ log10(f_tl)",
+                                    "log10(f_w) ~ log10(f_hl)")) %>% 
+  mutate(formula2 = map(formula, as.formula)) %>% 
+  separate(formula, into = c("dep_var", "exp_var"), sep = "~", remove = F) %>% 
+  mutate(model = map(formula2, ~lm(., data = gsb_data_filtered), gsb_data_filtered = gsb_data_filtered),
+         res_plot = map2(.x = model, .y = model_name, .f = res_plot),
+         dep_var = str_trim(dep_var),
+         dep_var = str_remove_all(dep_var, "f_"))
+
+```
+
+## Fish parameter results
+
+### Table
+
+```{r, results = "asis"}
+stargazer(length_models$model,
+          single.row = T,
+          dep.var.labels.include = T,
+          dep.var.labels = length_models$dep_var,
+          type = "html",
+          out = "test.html")
+```
+
+### Residual plots
+
+```{r}
+length_models$res_plot
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

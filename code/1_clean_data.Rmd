@@ -4,6 +4,8 @@ date: "`r format(Sys.time(), '%B %d, %Y')`"
 output: 
   html_document: 
     code_folding: hide
+    toc: yes
+    toc_float: yes
 knit: (function(inputFile, encoding) {
   rmarkdown::render(inputFile, encoding = encoding, output_dir = here::here("docs")) })
 ---
@@ -35,7 +37,7 @@ The dataset lives under `raw_data/DB_Otolith_GiantSeaBass_190826` as an excel sp
 
 As of right now, the data look like this:
 
-![](../../docs/img/screenshot_DB_Otolith_GiantSeaBass_190826.png)
+![](../docs/img/screenshot_DB_Otolith_GiantSeaBass_190826.png)
 
 Each row represents a record, as indicated by the `Record_number` field. There is also a `Record_ID` that contains more information about the sample. A couple of details to bear in mind:
 
