@@ -121,6 +121,8 @@ gsb_data <-
   select(record_number, project, record_id, date, loc_region, catch_site, catch_site_acc, lat, long, sex,
          starts_with("f_"),
          starts_with("o_"),
+         age,
+         age2,
          obs)
 
 colnames(gsb_data)

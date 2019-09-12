@@ -57,9 +57,9 @@ ggplot <- function(...) ggplot2::ggplot(...) + scale_fill_brewer(palette = "Set1
 This document contains the analyses of biometric data for Giant Sea Bass. We will first focus on the fish biometrics and all their relationships. We will then go to otolith biometrics. Then we'll combine these two.
 
 
-# Fish biometrics {.tabset}
+# Body measurements {.tabset}
 
-Fish biometrics makes reference to the following variables:
+Body biometrics makes reference to the following variables:
 
 - `f_w` for fish weight, in kg
 - `f_tl` for fish Total Length, in cm
@@ -220,16 +220,80 @@ length_models$res_plot
 
 
 
+# Otolith measurements {.tabset}
+
+Body biometrics makes reference to the following variables:
+
+- `o_de` for otolith depth
+- `o_le` for otolith length
+- `o_wi` for otolith width
+- `o_td` for otolith total depth
+- `o_we` for otolith weight
+
+Additionally
+
+- `o_side` to specify the side of the hade from where the otolith chame
+- `o_condition` to specify if it was complete or broken
+- `o_obs` for any observations
+
+## DE 2 TD
+
+```{r}
+gsb_data %>% 
+  select(o_de, o_td, o_side, o_condition) %>% 
+  drop_na(o_de, o_td) %>% 
+  ggplot(aes(x = o_de, y = o_td)) +
+  geom_smooth(method = "lm") +
+  geom_point(aes(fill = o_side, color = o_condition))
+```
+
+## DE 2 LE
+
+```{r}
+gsb_data %>% 
+  select(o_de, o_le, o_side, o_condition) %>% 
+  drop_na(o_de, o_le) %>% 
+  mutate(o_condition = ifelse(o_condition == "Fine", NA, o_condition)) %>% 
+  ggplot(aes(x = log10(o_de), y = log10(o_le))) +
+  geom_smooth(method = "lm") +
+  geom_point(aes(fill = o_side, color = o_condition))
+```
+
+## DE 2 WI
+
+```{r}
+gsb_data %>% 
+  select(o_de, o_wi, o_side, o_condition) %>% 
+  drop_na(o_de, o_wi) %>% 
+  mutate(o_condition = ifelse(o_condition == "Fine", NA, o_condition)) %>% 
+  ggplot(aes(x = log10(o_de), y = log10(o_wi))) +
+  geom_smooth(method = "lm") +
+  geom_point(aes(fill = o_side, color = o_condition))
+```
+
+## DE 2 WE
+
+```{r}
+gsb_data %>% 
+  select(o_de, o_we, o_side, o_condition) %>% 
+  drop_na(o_de, o_we) %>% 
+  ggplot(aes(x = log10(o_de), y = log10(o_we))) +
+  geom_smooth(method = "lm") +
+  geom_point(aes(fill = o_side, color = o_condition))
+```
+
+```{r}
+gsb_data %>% 
+  select(starts_with("o_"), age, age2) %>% 
+  ggplot()
+```
 
 
 
 
+# Body - Otolith relationships {.tabset}
 
-
-
-
-
-
+## blah
 
 
 
